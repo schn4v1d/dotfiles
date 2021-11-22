@@ -1,0 +1,301 @@
+#+title Emacs Configuration
+#+PROPERTY: header-args:emacs-lisp :tangle ~/.emacs.d/init.el
+
+* Table of Contents
+:PROPERTIES:
+:TOC:      :include all :depth 4 :ignore (this)
+:END:
+:CONTENTS:
+- [[#basic-configuration][Basic Configuration]]
+- [[#package-setup][Package Setup]]
+  - [[#configure-use-package][Configure use-package]]
+- [[#theme-configuration][Theme Configuration]]
+- [[#font-configuration][Font Configuration]]
+- [[#org-mode][Org Mode]]
+  - [[#visual-fill][Visual Fill]]
+  - [[#auto-tangle-configuration][Auto-tangle Configuration]]
+- [[#evil-mode][Evil Mode]]
+- [[#key-bindings][Key Bindings]]
+  - [[#esc-cancels-all][ESC Cancels All]]
+  - [[#unbind-c-z][Unbind C-z]]
+  - [[#set-up-which-key][Set up which-key]]
+  - [[#set-up-general][Set up general]]
+  - [[#basic-keybindings][Basic Keybindings]]
+:END:
+
+* Basic Configuration
+  
+#+begin_src emacs-lisp
+
+  (setq inhibit-startup-message t)
+
+  (scroll-bar-mode -1)
+  (tool-bar-mode -1)
+  (tooltip-mode -1)
+  (set-fringe-mode 0)
+
+  (menu-bar-mode -1)
+
+  (setq visible-bell t)
+
+  (load-theme 'wombat)
+
+  (setq-default tab-width 2)
+  (setq-default indent-tabs-mode nil)
+  (setq-default tab-always-indent t)
+  (electric-indent-local-mode 1)
+  (electric-indent-mode 1)
+
+
+#+end_src
+
+* Package Setup
+
+#+begin_src emacs-lisp
+
+  (require 'package)
+
+  (setq package-archives '(("melpa" . "https://melpa.org/packages/")
+                           ("org" . "https://orgmode.org/elpa/")
+                           ("elpa" . "https://elpa.gnu.org/packages/")))
+
+  (package-initialize)
+    (unless package-archive-contents
+      (package-refresh-contents))
+
+#+end_src
+  
+** Configure =use-package=
+
+#+begin_src emacs-lisp
+
+  (unless (package-installed-p 'use-package)
+    (package-install 'use-package))
+
+  (require 'use-package)
+  (setq use-package-always-ensure t)
+
+#+end_src
+
+#+begin_src emacs-lisp
+
+  (use-package ivy
+    :ensure t
+    :bind (("C-s" . swiper)
+           :map ivy-minibuffer-map
+           ("TAB" . ivy-alt-done)
+           ("C-l" . ivy-alt-done)
+           ("C-j" . ivy-next-line)
+           ("C-k" . ivy-previous-line)
+           :map ivy-switch-buffer-map
+           ("C-k" . ivy-previous-line)
+           ("C-l" . ivy-done)
+           ("C-d" . ivy-switch-buffer-kill)
+           :map ivy-reverse-i-search-map
+           ("C-k" . ivy-previous-line)
+           ("C-d" . ivy-reverse-i-search-kill))
+    :config
+    (ivy-mode 1))
+
+  (use-package all-the-icons
+    :if (display-graphic-p)
+    :commands all-the-icons-install-fonts
+    :init
+    (unless (find-font (font-spec :name "all-the-icons"))
+      (all-the-icons-install-fonts t)))
+
+  (use-package all-the-icons-dired
+    :if (display-graphic-p)
+    :hook (dired-mode . all-the-icons-dired-mode))
+
+  (use-package doom-modeline
+    :ensure t
+    :init (doom-modeline-mode 1)
+    :custom (doom-modeline-height 25))
+
+  (column-number-mode)
+  (global-display-line-numbers-mode t)
+  (setq display-line-numbers 'relative)
+
+  ;; Disable line numbers for some modes
+  (dolist (mode '(org-mode-hook
+                  term-mode-hook
+                  shell-mode-hook
+                  eshell-mode-hook))
+  (add-hook mode (lambda () (display-line-numbers-mode 0))))
+
+  (use-package rainbow-delimiters
+    :hook (prog-mode . rainbow-delimiters-mode))
+
+  (use-package ivy-rich
+    :ensure t
+    :init
+    (ivy-rich-mode 1))
+
+  (use-package counsel 
+    :ensure t
+    :bind (("M-x" . counsel-M-x)
+           ("C-x b" . counsel-ibuffer)
+           ("C-x C-f" . counsel-find-file)
+           :map minibuffer-local-map
+           ("C-r" . 'counsel-minibuffer-history)))
+
+#+end_src
+
+* Theme Configuration
+
+#+begin_src emacs-lisp
+
+  (use-package doom-themes
+    :init (load-theme 'doom-vibrant t))
+
+#+end_src
+
+* Font Configuration
+
+#+begin_src emacs-lisp
+
+  (set-face-attribute 'default nil :font "Fira Code Retina" :height 140)
+
+#+end_src
+
+* Org Mode
+
+[[https://orgmode.org][Org Mode Homepage]]
+
+#+begin_src emacs-lisp
+
+  (defun schnavid/org-mode-setup ()
+    (org-indent-mode)
+    (visual-line-mode 1)
+    (setq evil-auto-indent nil))
+
+  (use-package org
+    :hook (org-mode . schnavid/org-mode-setup))
+
+  (use-package org-bullets
+    :after org
+    :hook (org-mode . org-bullets-mode))
+
+  (use-package org-make-toc
+    :after org
+    :hook (org-mode . org-make-toc-mode))
+
+#+end_src
+
+** Visual Fill
+
+#+begin_src emacs-lisp
+
+  (defun schnavid/org-mode-visual-fill ()
+    (setq visual-fill-column-width 120
+          visual-fill-column-center-text t)
+    (visual-fill-column-mode 1))
+
+  (use-package visual-fill-column
+    :hook (org-mode . schnavid/org-mode-visual-fill))
+
+#+end_src
+
+** Auto-tangle Configuration
+
+#+begin_src emacs-lisp
+
+  (defun schnavid/org-babel-tangle-config ()
+      (when (string-equal (buffer-file-name)
+        (expand-file-name "~/.config/emacs/Emacs.org"))
+        (let ((org-confirm-babel-evauate nil))
+          (org-babel-tangle))))
+
+  (add-hook 'org-mode-hook (lambda () (add-hook 'after-save-hook
+                                                #'schnavid/org-babel-tangle-config)))
+
+#+end_src
+
+* Evil Mode
+
+#+begin_src emacs-lisp
+
+  (use-package evil
+    :init
+    (setq evil-want-integration t)
+    (setq evil-want-keybinding nil)
+    (setq evil-want-C-u-scroll t)
+    (setq evil-want-C-i-jump nil)
+    :config
+    (evil-mode 1)
+    (dolist (mode '(custom-mode
+                    eshell-mode
+                    git-rebase-mode
+                    erc-mode
+                    circe-server-mode
+                    circe-chat-mode
+                    circe-query-mode
+                    sauron-mode
+                    term-mode))
+      (add-to-list 'evil-emacs-state-modes mode))
+    (define-key evil-insert-state-map (kbd "C-g") 'evil-normal-state)
+    (define-key evil-insert-state-map (kbd "C-h") 'evil-delete-backward-char-and-join)
+
+    (evil-global-set-key 'motion "j" 'evil-next-visual-line)
+    (evil-global-set-key 'motion "k" 'evil-previous-visual-line)
+
+    (evil-set-initial-state 'messages-buffer-mode 'normal)
+    (evil-set-initial-state 'dashboard-mode 'normal))
+
+#+end_src
+
+* Key Bindings
+
+** ESC Cancels All
+
+#+begin_src emacs-lisp
+
+  (global-set-key (kbd "<escape>") 'keyboard-escape-quit)
+
+#+end_src
+
+** Unbind =C-z=
+
+#+begin_src emacs-lisp
+
+  (global-unset-key (kbd "C-z"))
+
+#+end_src
+
+** Set up =which-key=
+
+#+begin_src emacs-lisp
+
+  (use-package which-key
+    :init (which-key-mode)
+    :config
+    (setq which-key-idle-delay 0.3))
+
+#+end_src
+
+** Set up =general=
+
+#+begin_src emacs-lisp
+
+  (use-package general
+    :config
+    (general-evil-setup t)
+    (general-create-definer schnavid/leader-keys
+      :keymaps '(normal insert visual emacs)
+      :prefix "SPC"
+      :global-prefix "C-SPC"))
+
+#+end_src
+
+** Basic Keybindings
+
+#+begin_src emacs-lisp
+
+  (schnavid/leader-keys
+    "t"  '(:ignore t :which-key "toggles")
+    "tt" '(counsel-load-theme :which-key "choose theme")
+    "f"  '(:ignore t :which-key "files")
+    "ff" '(counsel-find-file :which-key "find file"))
+
+#+end_src
