@@ -7,11 +7,27 @@
 :END:
 :CONTENTS:
 - [[#basic-configuration][Basic Configuration]]
-- [[#package-setup][Package Setup]]
-  - [[#configure-use-package][Configure use-package]]
+- [[#system-settings][System Settings]]
+- [[#package-management][Package Management]]
+  - [[#setup-setupel][Setup setup.el]]
+    - [[#pkg][:pkg]]
+    - [[#delay][:delay]]
+    - [[#load-after][:load-after]]
+- [[#keep-emacsd-clean][Keep .emacs.d Clean]]
+- [[#git][Git]]
+- [[#completion][Completion]]
+  - [[#ivy][Ivy]]
+- [[#editing][Editing]]
+  - [[#tab-widths][Tab Widths]]
+  - [[#use-spaces-instead-of-tabs][Use spaces instead of tabs]]
+  - [[#commenting-lines][Commenting Lines]]
+- [[#other-stuff][Other Stuff]]
 - [[#theme-configuration][Theme Configuration]]
 - [[#font-configuration][Font Configuration]]
+- [[#programming][Programming]]
+  - [[#lua][Lua]]
 - [[#org-mode][Org Mode]]
+  - [[#org-roam][Org Roam]]
   - [[#visual-fill][Visual Fill]]
   - [[#auto-tangle-configuration][Auto-tangle Configuration]]
 - [[#evil-mode][Evil Mode]]
@@ -21,6 +37,7 @@
   - [[#set-up-which-key][Set up which-key]]
   - [[#set-up-general][Set up general]]
   - [[#basic-keybindings][Basic Keybindings]]
+- [[#emacs-guix-profile][Emacs Guix Profile]]
 :END:
 
 * Basic Configuration
@@ -40,16 +57,20 @@
 
   (load-theme 'wombat)
 
-  (setq-default tab-width 2)
-  (setq-default indent-tabs-mode nil)
-  (setq-default tab-always-indent t)
-  (electric-indent-local-mode 1)
-  (electric-indent-mode 1)
 
 
 #+end_src
 
-* Package Setup
+
+* System Settings
+
+#+begin_src emacs-lisp
+
+  (setq schnavid/is-guix-system (eq system-type 'gnu/linux))
+
+#+end_src
+
+* Package Management
 
 #+begin_src emacs-lisp
 
@@ -63,39 +84,212 @@
     (unless package-archive-contents
       (package-refresh-contents))
 
+  (unless (featurep 'straight)
+    (defvar bootstrap-version)
+    (let ((bootstrap-file
+           (expand-file-name "straight/repos/straight.el/bootstrap.el" user-emacs-directory))
+          (bootstrap-version 5))
+      (unless (file-exists-p bootstrap-file)
+        (with-current-buffer
+            (url-retrieve-synchronously
+             "https://raw.githubusercontent.com/raxod502/straight.el/develop/install.el"
+             'silent 'inhibit-cookies)
+          (goto-char (point-max))
+          (eval-print-last-sexp)))
+      (load bootstrap-file nil 'nomessage)))
+
+  ;; Use straight.el for use-package expressions
+  (straight-use-package 'use-package)
+
 #+end_src
-  
-** Configure =use-package=
+
+** Setup =setup.el=
 
 #+begin_src emacs-lisp
 
-  (unless (package-installed-p 'use-package)
-    (package-install 'use-package))
-
-  (require 'use-package)
-  (setq use-package-always-ensure t)
+  (straight-use-package '(setup :type git :host nil :repo "https://git.sr.ht/~pkal/setup"))
+  (require 'setup)
 
 #+end_src
 
+*** =:pkg=
+
 #+begin_src emacs-lisp
 
-  (use-package ivy
-    :ensure t
-    :bind (("C-s" . swiper)
-           :map ivy-minibuffer-map
-           ("TAB" . ivy-alt-done)
-           ("C-l" . ivy-alt-done)
-           ("C-j" . ivy-next-line)
-           ("C-k" . ivy-previous-line)
-           :map ivy-switch-buffer-map
-           ("C-k" . ivy-previous-line)
-           ("C-l" . ivy-done)
-           ("C-d" . ivy-switch-buffer-kill)
-           :map ivy-reverse-i-search-map
-           ("C-k" . ivy-previous-line)
-           ("C-d" . ivy-reverse-i-search-kill))
-    :config
+  (defvar schnavid/guix-emacs-packages '()
+    "Contains a list of all Emacs package names that must be installed via Guix.")
+
+  (defun schnavid/filter-straight-recipe (recipe)
+    (let* ((plist (cdr recipe))
+           (name (plist-get plist :straight)))
+      (cons (if (and name (not (equal name t)))
+                name
+              (car recipe))
+            (plist-put plist :straight nil))))
+
+  (setup-define :pkg
+                (lambda (&rest recipe)
+                  (if (and schnavid/is-guix-system
+                           (or (eq (length recipe) 1)
+                               (plist-get (cdr recipe) :guix)))
+                      `(add-to-list 'schnavid/guix-emacs-packages
+                                    ,(or (plist-get recipe :guix)
+                                         (concat "emacs-" (symbol-name (car recipe)))))
+                    `(straight-use-package ',(schnavid/filter-straight-recipe recipe))))
+                :documentation "Install RECIPE via Guix or straight.el"
+                :shorthand #'cadr)
+
+#+end_src
+
+*** =:delay=
+
+#+begin_src emacs-lisp
+
+  (setup-define :delay
+    (lambda (&rest time)
+      `(run-with-idle-timer ,(or time 1)
+                            nil ;; Don't repeat
+                            (lambda () (require ',(setup-get 'feature)))))
+    :documentation "Delay loading the feature until a certain amount of idle time has passed.")
+
+#+end_src
+
+*** =:load-after=
+
+#+begin_src emacs-lisp
+
+  (setup-define :load-after
+    (lambda (features &rest body)
+      (let ((body `(progn
+                     (require ',(setup-get 'feature))
+                     ,@body)))
+        (dolist (feature (if (listp features)
+                             (nreverse features)
+                           (list features)))
+          (setq body `(with-eval-after-load ',feature ,body)))
+        body))
+    :documentation "Load the current feature after FEATURES."
+    :indent 1)
+
+#+end_src
+
+* Keep =.emacs.d= Clean
+
+#+begin_src emacs-lisp
+
+  (setq user-emacs-directory (expand-file-name "~/.cache/emacs/")
+        url-history-file     (expand-file-name "url/history" user-emacs-directory))
+
+  (setup (:pkg no-littering)
+    (require 'no-littering))
+
+  (setq custom-file
+      (if (boundp 'server-socket-dir)
+          (expand-file-name "custom.el" server-socket-dir)
+      (expand-file-name (format "emacs-custom-%s.el" (user-uid)) temporary-file-directory)))
+  (load custom-file t)
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-no-littering"
+
+#+end_src
+
+* Git
+
+#+begin_src emacs-lisp
+
+  (setup (:pkg magit)
+    (:also-load magit-todos)
+    (:global "C-M-;" magit-status)
+    (:option magit-display-buffer-function #'magit-display-buffer-same-window-except-diff-v1))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-magit"
+  "emacs-magit-todos"
+
+#+end_src
+
+* Completion
+
+** Ivy
+
+#+begin_src emacs-lisp
+
+  (setup (:pkg ivy)
+    (:bind "C-s" swiper)
+    (:with-map ivy-minibuffer-map
+      (:bind "TAB" ivy-alt-done
+             "C-l" ivy-alt-done
+             "C-j" ivy-next-line
+             "C-k" ivy-previous-line))
+    (:with-map ivy-switch-buffer-map
+      (:bind "C-k" ivy-previous-line
+             "C-l" ivy-done
+             "C-d" ivy-switch-buffer-kill))
+    (:with-map ivy-reverse-i-search-map
+      (:bind "C-k" ivy-previous-line
+             "C-d" ivy-reverse-i-search-kill))
     (ivy-mode 1))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-ivy"
+
+#+end_src
+
+* Editing
+
+** Tab Widths
+
+#+begin_src emacs-lisp
+
+  (setq-default tab-width 2)
+  (setq-default evil-shift-width tab-width)
+
+#+end_src
+
+** Use spaces instead of tabs
+
+#+begin_src emacs-lisp
+
+  (setq-default indent-tabs-mode nil)
+
+#+end_src
+
+** Commenting Lines
+
+#+begin_src emacs-lisp
+
+  (setup (:pkg evil-nerd-commenter)
+    (:global "M-/" evilnc-comment-or-uncomment-lines))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-evil-nerd-commenter"
+
+#+end_src
+
+* Other Stuff
+
+#+begin_src emacs-lisp
 
   (use-package all-the-icons
     :if (display-graphic-p)
@@ -124,21 +318,28 @@
                   eshell-mode-hook))
   (add-hook mode (lambda () (display-line-numbers-mode 0))))
 
-  (use-package rainbow-delimiters
-    :hook (prog-mode . rainbow-delimiters-mode))
+  (setup (:pkg rainbow-delimiters)
+    (:hook-into prog-mode))
 
-  (use-package ivy-rich
-    :ensure t
-    :init
+  (setup (:pkg ivy-rich)
     (ivy-rich-mode 1))
 
-  (use-package counsel 
-    :ensure t
-    :bind (("M-x" . counsel-M-x)
-           ("C-x b" . counsel-ibuffer)
-           ("C-x C-f" . counsel-find-file)
-           :map minibuffer-local-map
-           ("C-r" . 'counsel-minibuffer-history)))
+  (setup (:pkg counsel)
+    (:bind "M-x"  counsel-M-x
+           "C-x b"  counsel-ibuffer
+           "C-x C-f"  counsel-find-file)
+    (:with-map minibuffer-local-map
+      (:bind "C-r" 'counsel-minibuffer-history)))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-rainbow-delimiters"
+  "emacs-ivy-rich"
+  "emacs-counsel"
 
 #+end_src
 
@@ -146,8 +347,17 @@
 
 #+begin_src emacs-lisp
 
-  (use-package doom-themes
-    :init (load-theme 'doom-vibrant t))
+  (setup (:pkg doom-themes))
+  (load-theme 'doom-vibrant t)
+  (doom-themes-visual-bell-config)
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-doom-themes"
 
 #+end_src
 
@@ -156,6 +366,32 @@
 #+begin_src emacs-lisp
 
   (set-face-attribute 'default nil :font "Fira Code Retina" :height 140)
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "font-fira-code"
+
+#+end_src
+
+* Programming
+
+** Lua
+
+#+begin_src emacs-lisp
+
+  (setup (:pkg lua-mode))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-lua-mode"
 
 #+end_src
 
@@ -170,16 +406,45 @@
     (visual-line-mode 1)
     (setq evil-auto-indent nil))
 
-  (use-package org
-    :hook (org-mode . schnavid/org-mode-setup))
+  (setup (:pkg org)
+    (:hook schnavid/org-mode-setup))
 
-  (use-package org-bullets
-    :after org
-    :hook (org-mode . org-bullets-mode))
+  (setup (:pkg org-bullets)
+    (:hook-into org-mode))
 
-  (use-package org-make-toc
-    :after org
-    :hook (org-mode . org-make-toc-mode))
+  (setup (:pkg org-make-toc)
+    (:hook-into org-mode))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-org"
+  "emacs-org-bullets"
+  "emacs-org-make-toc"
+
+#+end_src
+
+** Org Roam
+
+#+begin_src emacs-lisp
+
+  (setup (:pkg org-roam)
+    (setq org-roam-v2-ack t)
+    (:option org-roam-directory "~/RoamNotes")
+    (:global "C-c n l" org-roam-buffer-toggle
+             "C-c n f" org-roam-node-find
+             "C-c n i" org-roam-node-insert))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-org-roam"
 
 #+end_src
 
@@ -187,13 +452,18 @@
 
 #+begin_src emacs-lisp
 
-  (defun schnavid/org-mode-visual-fill ()
+  (setup (:pkg visual-fill-column)
     (setq visual-fill-column-width 120
           visual-fill-column-center-text t)
-    (visual-fill-column-mode 1))
+    (:hook-into org-mode))
 
-  (use-package visual-fill-column
-    :hook (org-mode . schnavid/org-mode-visual-fill))
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-visual-fill-column"
 
 #+end_src
 
@@ -203,7 +473,7 @@
 
   (defun schnavid/org-babel-tangle-config ()
       (when (string-equal (buffer-file-name)
-        (expand-file-name "~/.config/emacs/Emacs.org"))
+        (expand-file-name "~/dotfiles/Emacs.org"))
         (let ((org-confirm-babel-evauate nil))
           (org-babel-tangle))))
 
@@ -216,14 +486,20 @@
 
 #+begin_src emacs-lisp
 
-  (use-package evil
-    :init
+  (setup (:pkg undo-tree)
+    (setq undo-tree-auto-save-history nil)
+    (global-undo-tree-mode 1))
+
+  (setup (:pkg evil)
     (setq evil-want-integration t)
     (setq evil-want-keybinding nil)
     (setq evil-want-C-u-scroll t)
     (setq evil-want-C-i-jump nil)
-    :config
+    (setq evil-respect-visual-line-mode t)
+    ; (setq evil-undo-system 'undo-tree)
+
     (evil-mode 1)
+
     (dolist (mode '(custom-mode
                     eshell-mode
                     git-rebase-mode
@@ -234,6 +510,7 @@
                     sauron-mode
                     term-mode))
       (add-to-list 'evil-emacs-state-modes mode))
+
     (define-key evil-insert-state-map (kbd "C-g") 'evil-normal-state)
     (define-key evil-insert-state-map (kbd "C-h") 'evil-delete-backward-char-and-join)
 
@@ -242,6 +519,24 @@
 
     (evil-set-initial-state 'messages-buffer-mode 'normal)
     (evil-set-initial-state 'dashboard-mode 'normal))
+
+  ;; (setup (:pkg evil-collection)
+  ;;   (setq evil-collection-company-use-tng nil)
+  ;;   (:load-after evil
+  ;;     (:option evil-collection-outline-bind-tab-p nil
+  ;;              (remove evil-collection-mode-list) 'lispy
+  ;;              (remove evil-collection-mode-list) 'org-present)
+  ;;     (evil-collection-init)))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-undo-tree"
+  "emacs-evil"
+  "emacs-evil-collection"
 
 #+end_src
 
@@ -267,10 +562,17 @@
 
 #+begin_src emacs-lisp
 
-  (use-package which-key
-    :init (which-key-mode)
-    :config
+  (setup (:pkg which-key)
+    (which-key-mode)
     (setq which-key-idle-delay 0.3))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-which-key"
 
 #+end_src
 
@@ -278,13 +580,21 @@
 
 #+begin_src emacs-lisp
 
-  (use-package general
-    :config
+  (setup (:pkg general)
     (general-evil-setup t)
+
     (general-create-definer schnavid/leader-keys
       :keymaps '(normal insert visual emacs)
       :prefix "SPC"
       :global-prefix "C-SPC"))
+
+#+end_src
+
+*Guix Packages*
+
+#+begin_src scheme :noweb-ref packages :noweb-sep ""
+
+  "emacs-general"
 
 #+end_src
 
@@ -297,5 +607,17 @@
     "tt" '(counsel-load-theme :which-key "choose theme")
     "f"  '(:ignore t :which-key "files")
     "ff" '(counsel-find-file :which-key "find file"))
+
+#+end_src
+
+* Emacs Guix Profile
+
+*.config/guix/manifests/emacs.scm:*
+
+#+begin_src scheme :tangle .config/guix/manifests/emacs.scm :noweb yes
+
+  (specifications->manifest
+   '("emacs"
+     <<packages>>))
 
 #+end_src

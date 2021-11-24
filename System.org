@@ -63,6 +63,7 @@
     #:use-module (gnu packages web-browsers)
     #:use-module (gnu packages version-control)
     #:use-module (gnu packages package-management)
+    #:use-module (gnu packages zsh)
     #:use-module (nongnu packages linux)
     #:use-module (nongnu system linux-initrd))
 
@@ -164,8 +165,7 @@ Define the =base-operating-system= which will be inherited by all machine config
      ;; entry, so add one that is meant to be overridden
      (file-systems (cons*
                     (file-system
-                     (mount-point "/tmp"
-                                  )
+                     (mount-point "/tmp")
                      (device "none")
                      (type "tmpfs")
                      (check? #f))
@@ -174,6 +174,7 @@ Define the =base-operating-system= which will be inherited by all machine config
                    (name "schnavid")
                    (comment "David Schneider")
                    (group "users")
+                   (shell (file-append zsh "/bin/zsh"))
                    (home-directory "/home/schnavid")
                    (supplementary-groups
                     '("wheel"              ; sudo
@@ -182,7 +183,6 @@ Define the =base-operating-system= which will be inherited by all machine config
                       "realtime"           ; Enable realtime scheduling
                       "lp"                 ; control bluetooth devices
                       "audio"              ; control audio devices
-
                       "video")))           ; control video devices
                   %base-user-accounts))
      ;; Add the 'realtime' group
@@ -219,7 +219,7 @@ Define the =base-operating-system= which will be inherited by all machine config
                                (tlp-configuration
                                 (cpu-boost-on-ac? #t)
                                 (wifi-pwr-on-bat? #t)))
-                      (pam-limits-service ; This enables JACK to enter realtime mode
+                      (pam-limits-service ;; This enables JACK to enter realtime mode
                        (list
                         (pam-limits-entry "@realtime" 'both 'rtprio 99)
                         (pam-limits-entry "@realtime" 'both 'memlock 'unlimited)))
@@ -241,6 +241,7 @@ Define the =base-operating-system= which will be inherited by all machine config
                       (remove (lambda (service)
                                 (eq? (service-kind service) gdm-service-type))
                               %my-desktop-services)))
+
      ;; Allow resolution of '.local' host names with mDNS
      (name-service-switch %mdns-host-lookup-nss)))
 
@@ -296,5 +297,50 @@ I also define a function called =schnavid/system-settings-get= which can retriev
             (device (uuid "549C-9631" 'fat32))
             (type "vfat"))
            %base-file-systems)))
+
+#+end_src
+
+* Scripts
+
+*bin/activate-profiles:*
+
+#+begin_src shell :tangle bin/activate-profiles
+
+  GREEN='\033[1;32m'
+  RED='\033[1;30m'
+  NC='\033[0m'
+  GUIX_EXTRA_PROFILES=$HOME/.guix-extra-profiles
+
+  profiles=$*
+  if [[ $# -eq 0 ]]; then
+    profiles="$HOME/.config/guix/manifests/*.scm";
+  fi
+
+  for profile in $profiles; do
+    # Remove the path and file extension, if any
+    profileName=$(basename $profile)
+    profileName="${profileName%.*}"
+    profilePath="$GUIX_EXTRA_PROFILES/$profileName"
+    manifestPath=$HOME/.config/guix/manifests/$profileName.scm
+
+    if [ -f $manifestPath ]; then
+      echo
+      echo -e "${GREEN}Activating profile:" $manifestPath "${NC}"
+      echo
+
+      mkdir -p $profilePath
+      guix package --manifest=$manifestPath --profile="$profilePath/$profileName"
+
+      # Source the new profile
+      GUIX_PROFILE="$profilePath/$profileName"
+      if [ -f $GUIX_PROFILE/etc/profile ]; then
+        . "$GUIX_PROFILE"/etc/profile
+      else
+        echo -e "${RED}Couldn't find profile:" $GUIX_PROFILE/etc/profile "${NC}"
+      fi
+    else
+      echo "No profile found at path" $profilePath
+    fi
+  done
 
 #+end_src

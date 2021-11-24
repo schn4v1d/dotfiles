@@ -103,8 +103,7 @@ EndSection
    ;; entry, so add one that is meant to be overridden
    (file-systems (cons*
                   (file-system
-                   (mount-point "/tmp"
-                                )
+                   (mount-point "/tmp")
                    (device "none")
                    (type "tmpfs")
                    (check? #f))
@@ -121,7 +120,6 @@ EndSection
                     "realtime"           ; Enable realtime scheduling
                     "lp"                 ; control bluetooth devices
                     "audio"              ; control audio devices
-
                     "video")))           ; control video devices
                 %base-user-accounts))
    ;; Add the 'realtime' group
@@ -158,7 +156,7 @@ EndSection
                              (tlp-configuration
                               (cpu-boost-on-ac? #t)
                               (wifi-pwr-on-bat? #t)))
-                    (pam-limits-service ; This enables JACK to enter realtime mode
+                    (pam-limits-service ;; This enables JACK to enter realtime mode
                      (list
                       (pam-limits-entry "@realtime" 'both 'rtprio 99)
                       (pam-limits-entry "@realtime" 'both 'memlock 'unlimited)))
@@ -180,5 +178,6 @@ EndSection
                     (remove (lambda (service)
                               (eq? (service-kind service) gdm-service-type))
                             %my-desktop-services)))
+
    ;; Allow resolution of '.local' host names with mDNS
    (name-service-switch %mdns-host-lookup-nss)))
